@@ -1,26 +1,86 @@
-#import <UIKit/UIKit.h>
+#import <dlfcn.h>
+#import <objc/runtime.h>
+#import <substrate.h>
 
-#import "Headers.h"
+@interface PSSpecifier : NSObject
++ (instancetype)deleteButtonSpecifierWithName:(NSString *)name target:(id)target action:(SEL)action;
+- (void)setProperty:(id)value forKey:(NSString *)key;
+- (id)propertyForKey:(NSString *)key;
+- (void)setConfirmationAction:(SEL)action;
+@property (nonatomic, readonly) NSString *identifier;
++ (id)emptyGroupSpecifier;
+@end
 
-%hook UsageDetailController
-
-- (NSArray *)specifiers
-{
-	if (!self->_specifiers) {
-		%orig();
-		NSMutableArray *_specifiers = self->_specifiers;
-		if ([self isAppController]) {
-			PSSpecifier *specifier = [PSSpecifier deleteButtonSpecifierWithName:@"Reset App" target:self action:@selector(resetDiskContent)];
-			[specifier setConfirmationAction:@selector(clearCaches)];
-			[_specifiers addObject:specifier];
-			specifier = [PSSpecifier deleteButtonSpecifierWithName:@"Clear App's Cache" target:self action:@selector(clearCaches)];
-			[specifier setConfirmationAction:@selector(clearCaches)];
-			[_specifiers addObject:specifier];
-		}
-		return _specifiers;
-	}
-	return %orig();
+@interface PSViewController : UIViewController {
+@public
+	PSSpecifier *_specifier;
 }
+@end
+
+@interface PSListController : PSViewController {
+@public
+	NSMutableArray *_specifiers;
+}
+- (NSArray *)specifiers;
+- (void)showConfirmationViewForSpecifier:(PSSpecifier *)specifier;
+@end
+
+@interface UsageDetailController : PSListController
+- (BOOL)isAppController;
+@end
+
+@interface LSBundleProxy : NSObject
+@property (nonatomic, readonly) NSURL *dataContainerURL;
+@end
+
+@interface LSApplicationProxy : LSBundleProxy
++ (instancetype)applicationProxyForIdentifier:(NSString *)identifier;
+@property (nonatomic, readonly) NSString *localizedShortName;
+@property (nonatomic, readonly) NSString *itemName;
+@property (nonatomic, readonly) NSNumber *dynamicDiskUsage;
+@end
+
+typedef const struct __SBSApplicationTerminationAssertion *SBSApplicationTerminationAssertionRef;
+
+extern "C" SBSApplicationTerminationAssertionRef SBSApplicationTerminationAssertionCreateWithError(void *unknown, NSString *bundleIdentifier, int reason, int *outError);
+extern "C" void SBSApplicationTerminationAssertionInvalidate(SBSApplicationTerminationAssertionRef assertion);
+extern "C" NSString *SBSApplicationTerminationAssertionErrorString(int error);
+
+#define NSLog(...)
+
+
+@interface PSStorageApp : NSObject
+@property (nonatomic,readonly) NSString * appIdentifier;
+@property (nonatomic,readonly) LSApplicationProxy * appProxy;
+@end
+
+@interface STStorageAppDetailController : PSListController
+{
+	PSStorageApp* _storageApp;
+}
+@end
+
+%hook STStorageAppDetailController
+- (NSArray*)specifiers
+{
+	NSArray* ret = %orig;
+	NSMutableArray* _specifiers = [ret mutableCopy];
+		PSSpecifier* specifier;
+		specifier = [PSSpecifier emptyGroupSpecifier];
+        [_specifiers addObject:specifier];
+		
+		specifier = [PSSpecifier deleteButtonSpecifierWithName:@"Reset App" target:self action:@selector(resetDiskContent)];
+		[specifier setConfirmationAction:@selector(clearCaches)];
+		[_specifiers addObject:specifier];
+		specifier = [PSSpecifier deleteButtonSpecifierWithName:@"Clear App's Cache" target:self action:@selector(clearCaches)];
+		[specifier setConfirmationAction:@selector(clearCaches)];
+		[_specifiers addObject:specifier];
+		
+		ret = [_specifiers copy];
+		MSHookIvar<NSArray*>(self, "_specifiers") = ret;
+	return ret;
+}
+
 
 static void ClearDirectoryURLContents(NSURL *url)
 {
@@ -42,7 +102,8 @@ static void ShowMessage(NSString *message)
 %new
 - (void)resetDiskContent
 {
-	NSString *identifier = self->_specifier.identifier;
+	PSStorageApp* _storageApp = MSHookIvar<PSStorageApp*>(self, "_storageApp");	
+	NSString *identifier = _storageApp.appIdentifier;
 	LSApplicationProxy *app = [LSApplicationProxy applicationProxyForIdentifier:identifier];
 	NSString *title = app.localizedShortName;
 	NSNumber *originalDynamicSize = [[app.dynamicDiskUsage retain] autorelease];
@@ -67,7 +128,8 @@ static void ShowMessage(NSString *message)
 %new
 - (void)clearCaches
 {
-	NSString *identifier = self->_specifier.identifier;
+	PSStorageApp* _storageApp = MSHookIvar<PSStorageApp*>(self, "_storageApp");	
+	NSString *identifier = _storageApp.appIdentifier;
 	LSApplicationProxy *app = [LSApplicationProxy applicationProxyForIdentifier:identifier];
 	NSString *title = app.localizedShortName;
 	NSNumber *originalDynamicSize = [[app.dynamicDiskUsage retain] autorelease];
@@ -89,16 +151,8 @@ static void ShowMessage(NSString *message)
 
 %end
 
-static void BundleLoadedCallback(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo)
-{
-	static BOOL loaded;
-	if (!loaded && [[(NSDictionary *)userInfo objectForKey:NSLoadedClasses] containsObject:@"UsageDetailController"]) {
-		loaded = YES;
-		%init();
-	}
-}
 
 %ctor
 {
-	CFNotificationCenterAddObserver(CFNotificationCenterGetLocalCenter(), NULL, BundleLoadedCallback, (CFStringRef)NSBundleDidLoadNotification, NULL, CFNotificationSuspensionBehaviorDeliverImmediately);
+	dlopen("/System/Library/PreferenceBundles/StorageSettings.bundle/StorageSettings", RTLD_LAZY);
 }

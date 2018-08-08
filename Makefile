@@ -1,13 +1,15 @@
+include $(THEOS)/makefiles/common.mk
+
 TWEAK_NAME = CacheClearer
-CacheClearer_FILES = Tweak.x
-CacheClearer_FRAMEWORKS = UIKit MobileCoreServices
-CacheClearer_PRIVATE_FRAMEWORKS = Preferences SpringBoardServices
 
-IPHONE_ARCHS = armv7 arm64
-ADDITIONAL_CFLAGS = -std=c99
-TARGET_IPHONEOS_DEPLOYMENT_VERSION = 7.0
+CacheClearer_FILES = /mnt/d/codes/CacheClearer/Tweak.xm
+CacheClearer_FRAMEWORKS = CydiaSubstrate UIKit MobileCoreServices CoreGraphics CoreFoundation Foundation
+CacheClearer_PRIVATE_FRAMEWORKS = SpringBoardServices Preferences
+CacheClearer_LDFLAGS = -Wl,-segalign,4000
 
-TWEAK_TARGET_PROCESS = Preferences
+export ARCHS = armv7 arm64
+CacheClearer_ARCHS = armv7 arm64
 
-include framework/makefiles/common.mk
-include framework/makefiles/tweak.mk
+include $(THEOS_MAKE_PATH)/tweak.mk
+	
+all::
